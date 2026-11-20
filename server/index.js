@@ -44,6 +44,15 @@ app.post('/api/pools/:id/confirm', (req, res) => {
   }
 });
 
+app.post('/api/pools/:id/dispute', (req, res) => {
+  try {
+    const result = escrow.disputeSlot(req.params.id, req.body.memberId, req.body.reason);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', app: 'SubRelay Escrow Engine' });
 });

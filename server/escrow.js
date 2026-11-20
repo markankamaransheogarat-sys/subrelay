@@ -92,12 +92,13 @@ class EscrowPool {
   joinSlot(poolId, { username, sbpAccount }) {
     const pool = this.pools.get(poolId);
     if (!pool) throw new Error('Пул подписки не найден');
+    if (!username || !sbpAccount) throw new Error('Необходимо указать имя пользователя и реквизиты СБП');
     if (pool.occupiedSlots >= pool.totalSlots) {
       throw new Error('Все слоты в этой подписке уже заняты');
     }
 
     const member = {
-      id: `usr-${Date.now().toString(36)}`,
+      id: `usr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       username,
       sbpAccount,
       joinedAt: new Date().toISOString(),
@@ -117,10 +118,29 @@ class EscrowPool {
     if (!pool) throw new Error('Пул подписки не найден');
     const member = pool.members.find((m) => m.id === memberId);
     if (!member) throw new Error('Участник не найден');
+    if (member.escrowStatus !== 'locked') {
+      throw new Error(`Невозможно подтвердить слот со статусом: ${member.escrowStatus}`);
+    }
 
     member.escrowStatus = 'released'; // Funds released to host
     pool.escrowLockedRub = Math.max(0, pool.escrowLockedRub - pool.pricePerSlotRub);
     return { success: true, member };
+  }
+
+  disputeSlot(poolId, memberId, reason = 'Не удалось активировать инвайт') {
+    const pool = this.pools.get(poolId);
+    if (!pool) throw new Error('Пул подписки не найден');
+    const member = pool.members.find((m) => m.id === memberId);
+    if (!member) throw new Error('Участник не найден');
+    if (member.escrowStatus !== 'locked') {
+      throw new Error(`Спор невозможен для статуса: ${member.escrowStatus}`);
+    }
+
+    member.escrowStatus = 'refunded';
+    member.disputeReason = reason;
+    pool.escrowLockedRub = Math.max(0, pool.escrowLockedRub - pool.pricePerSlotRub);
+    pool.occupiedSlots = Math.max(0, pool.occupiedSlots - 1);
+    return { success: true, member, pool };
   }
 }
 
