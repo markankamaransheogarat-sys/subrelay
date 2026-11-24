@@ -71,3 +71,44 @@ test('rejects invalid join input and overflow slots', () => {
   escrow.joinSlot(pool.id, { username: 'u2', sbpAccount: '+79000000001' });
   assert.throws(() => escrow.joinSlot(pool.id, { username: 'u3', sbpAccount: '+79000000002' }), /заняты/);
 });
+
+test('rejects invalid pool parameters and duplicate joins', () => {
+  assert.throws(() => escrow.createPool({ serviceId: 'spotify', hostUsername: 'H', totalSlots: 1 }), /totalSlots/);
+  assert.throws(() => escrow.createPool({ serviceId: 'spotify', hostUsername: 'H', totalSlots: 4, occupiedSlots: 5 }), /occupiedSlots/);
+  assert.throws(() => escrow.createPool({ serviceId: 'spotify', hostUsername: 'H', pricePerSlotRub: -10 }), /pricePerSlotRub/);
+
+  const pool = escrow.createPool({
+    serviceId: 'cursor',
+    hostUsername: 'DupHost',
+    totalSlots: 4,
+    occupiedSlots: 1,
+    pricePerSlotRub: 650,
+  });
+  escrow.joinSlot(pool.id, { username: '@unique_user', sbpAccount: '+79001112233' });
+  assert.throws(() => escrow.joinSlot(pool.id, { username: '@unique_user', sbpAccount: '+79001112233' }), /уже участвует/);
+});
+
+test('HTTP API exposes /health, /api/metrics, and validates pool creation', async () => {
+  const http = require('node:http');
+  const { createApp } = require('../server/index');
+  const server = http.createServer(createApp());
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    const healthRes = await fetch(`http://127.0.0.1:${port}/health`);
+    assert.equal(healthRes.status, 200);
+    assert.equal(healthRes.headers.get('x-content-type-options'), 'nosniff');
+    const health = await healthRes.json();
+    assert.equal(health.status, 'ok');
+    assert.ok(health.pools >= 3);
+
+    const badPoolRes = await fetch(`http://127.0.0.1:${port}/api/pools`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ serviceId: 'spotify', hostUsername: 'X', totalSlots: 99 }),
+    });
+    assert.equal(badPoolRes.status, 400);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

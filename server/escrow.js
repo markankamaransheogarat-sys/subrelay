@@ -71,14 +71,31 @@ class EscrowPool {
   }
 
   createPool(data) {
+    if (!data || !data.serviceId || !data.hostUsername) {
+      throw new Error('Необходимо указать serviceId и hostUsername');
+    }
+    const totalSlots = data.totalSlots !== undefined ? Number(data.totalSlots) : 4;
+    const occupiedSlots = data.occupiedSlots !== undefined ? Number(data.occupiedSlots) : 1;
+    const pricePerSlotRub = data.pricePerSlotRub !== undefined ? Number(data.pricePerSlotRub) : 200;
+
+    if (!Number.isInteger(totalSlots) || totalSlots < 2 || totalSlots > 12) {
+      throw new Error('totalSlots должен быть целым числом от 2 до 12');
+    }
+    if (!Number.isInteger(occupiedSlots) || occupiedSlots < 0 || occupiedSlots > totalSlots) {
+      throw new Error('occupiedSlots должен быть в диапазоне от 0 до totalSlots');
+    }
+    if (!Number.isFinite(pricePerSlotRub) || pricePerSlotRub <= 0) {
+      throw new Error('pricePerSlotRub должен быть положительным числом');
+    }
+
     const pool = {
-      id: data.id || `pool-${Date.now().toString(36)}`,
+      id: data.id || `pool-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       serviceId: data.serviceId,
       hostUsername: data.hostUsername,
-      hostCardCountry: data.hostCardCountry,
-      totalSlots: Number(data.totalSlots) || 4,
-      occupiedSlots: Number(data.occupiedSlots) || 1,
-      pricePerSlotRub: Number(data.pricePerSlotRub) || 200,
+      hostCardCountry: data.hostCardCountry || 'Global',
+      totalSlots,
+      occupiedSlots,
+      pricePerSlotRub,
       nextBillingDate: data.nextBillingDate,
       status: data.status || 'active',
       sbpPhoneMask: data.sbpPhoneMask || '+7 (9**) ***-**-**',
@@ -89,12 +106,35 @@ class EscrowPool {
     return pool;
   }
 
+  getMetrics() {
+    let totalLockedRub = 0;
+    let totalOccupiedSlots = 0;
+    let totalCapacitySlots = 0;
+    let activeDisputes = 0;
+    for (const pool of this.pools.values()) {
+      totalLockedRub += pool.escrowLockedRub;
+      totalOccupiedSlots += pool.occupiedSlots;
+      totalCapacitySlots += pool.totalSlots;
+      activeDisputes += pool.members.filter((m) => m.escrowStatus === 'refunded').length;
+    }
+    return {
+      pools: this.pools.size,
+      occupiedSlots: totalOccupiedSlots,
+      capacitySlots: totalCapacitySlots,
+      escrowLockedRub: totalLockedRub,
+      refundedDisputes: activeDisputes,
+    };
+  }
+
   joinSlot(poolId, { username, sbpAccount }) {
     const pool = this.pools.get(poolId);
     if (!pool) throw new Error('Пул подписки не найден');
     if (!username || !sbpAccount) throw new Error('Необходимо указать имя пользователя и реквизиты СБП');
     if (pool.occupiedSlots >= pool.totalSlots) {
       throw new Error('Все слоты в этой подписке уже заняты');
+    }
+    if (pool.members.some((m) => m.username === username && m.escrowStatus !== 'refunded')) {
+      throw new Error('Пользователь уже участвует в этом пуле');
     }
 
     const member = {
